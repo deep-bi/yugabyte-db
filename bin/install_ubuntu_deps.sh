@@ -24,6 +24,7 @@ packages=(
   libboost-system-dev
   libboost-thread-dev
   liboauth-dev
+  libpam0g-dev
   libsasl2-dev
   libtool
   ntp

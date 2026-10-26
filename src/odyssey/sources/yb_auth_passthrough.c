@@ -446,12 +446,8 @@ yb_forward_auth_pkt_server_to_client(od_client_t *client, od_server_t *server,
 			return progress;
 
 		case KIWI_BE_NOTICE_RESPONSE:
-			/* Simply forward the packet */
-			rc = yb_client_write_pkt(client, server, instance, msg,
-						 progress);
-			if (rc == -1) {
-				return YB_CLI_AUTH_FAILED;
-			}
+			/* libpq expects an authentication request before notices */
+			machine_msg_free(msg);
 
 			/* Wait in the loop for the Auth packet */
 			continue;

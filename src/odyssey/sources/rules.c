@@ -935,6 +935,7 @@ int od_rules_validate(od_rules_t *rules, od_config_t *config,
 			}
 #endif
 
+#ifndef YB_SUPPORT_FOUND
 			if (rule->password == NULL && rule->auth_query == NULL
 #ifdef PAM_FOUND
 			    && rule->auth_pam_service == NULL
@@ -950,6 +951,7 @@ int od_rules_validate(od_rules_t *rules, od_config_t *config,
 					 rule->db_name, rule->user_name);
 				return -1;
 			}
+#endif /* YB_SUPPORT_FOUND */
 		} else if (strcmp(rule->auth, "md5") == 0) {
 			rule->auth_mode = OD_RULE_AUTH_MD5;
 			if (rule->password == NULL &&

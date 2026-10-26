@@ -82,7 +82,7 @@ docker run -i \
   --mount "type=bind,source=${YB_SRC_ROOT}/build,target=/mnt/dir_with_package" "$docker_image" \
   bash -c '
     set -euo pipefail -x
-    yum install -y libatomic
+    yum install -y libatomic pam
     package_name=${YB_PACKAGE_PATH##*/}
     package_path=/mnt/dir_with_package/$package_name
     set +e

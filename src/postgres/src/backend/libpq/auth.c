@@ -122,6 +122,9 @@ static const char *pam_passwd = NULL;	/* Workaround for Solaris 2.6
 static Port *pam_port_cludge;	/* Workaround for passing "Port *port" into
 								 * pam_passwd_conv_proc */
 static bool pam_no_password;	/* For detecting no-password-given */
+
+/* YB: Defer PostgreSQL errors until PAM module dispatch has returned */
+static ErrorData *yb_pam_error;
 #endif							/* USE_PAM */
 
 
@@ -2250,6 +2253,10 @@ pam_passwd_conv_proc(int num_msg, const struct pam_message **msg,
 
 	*resp = NULL;				/* in case of error exit */
 
+	/* YB: A PAM stack may retry or ignore a failed conversation */
+	if (yb_pam_error != NULL)
+		return PAM_CONV_ERR;
+
 	if (num_msg <= 0 || num_msg > PAM_MAX_NUM_MSG)
 		return PAM_CONV_ERR;
 
@@ -2272,13 +2279,31 @@ pam_passwd_conv_proc(int num_msg, const struct pam_message **msg,
 			case PAM_PROMPT_ECHO_OFF:
 				if (strlen(passwd) == 0)
 				{
+					MemoryContext yb_oldcontext = CurrentMemoryContext;
+
 					/*
 					 * Password wasn't passed to PAM the first time around -
 					 * let's go ask the client to send a password, which we
 					 * then stuff into PAM.
 					 */
-					sendAuthRequest(pam_port_cludge, AUTH_REQ_PASSWORD, NULL, 0);
-					passwd = recv_password_packet(pam_port_cludge);
+					/*
+					 * YB: Return through PAM before rethrowing: Linux-PAM rejects
+					 * pam_end while a module is active. We still own the responses.
+					 */
+					PG_TRY();
+					{
+						sendAuthRequest(pam_port_cludge, AUTH_REQ_PASSWORD, NULL, 0);
+						passwd = recv_password_packet(pam_port_cludge);
+					}
+					PG_CATCH();
+					{
+						MemoryContextSwitchTo(yb_oldcontext);
+						yb_pam_error = CopyErrorData();
+						FlushErrorState();
+					}
+					PG_END_TRY();
+					if (yb_pam_error != NULL)
+						goto fail;
 					if (passwd == NULL)
 					{
 						/*
@@ -2340,6 +2365,11 @@ CheckPAMAuth(Port *port, const char *user, const char *password)
 	int			retval;
 	pam_handle_t *pamh = NULL;
 
+	/* YB: PAM callbacks can raise ERROR before returning a PAM status */
+	volatile int yb_pam_status = PAM_ABORT;
+	int			yb_status = STATUS_ERROR;
+	int			yb_end_status;
+
 	/*
 	 * We can't entirely rely on PAM to pass through appdata --- it appears
 	 * not to work on at least Solaris 2.6.  So use these ugly static
@@ -2371,105 +2401,143 @@ CheckPAMAuth(Port *port, const char *user, const char *password)
 				(errmsg("could not create PAM authenticator: %s",
 						pam_strerror(pamh, retval))));
 		pam_passwd = NULL;		/* Unset pam_passwd */
+
+		/* YB: Do not retain pointers to the completed authentication attempt */
+		pam_port_cludge = NULL;
+		pam_passw_conv.appdata_ptr = NULL;
 		return STATUS_ERROR;
 	}
 
-	retval = pam_set_item(pamh, PAM_USER, user);
-
-	if (retval != PAM_SUCCESS)
+	/*
+	 * YB: Auth-passthrough backends survive authentication failures. PAM owns
+	 * allocations outside PostgreSQL memory contexts, so release its handle on
+	 * both ordinary failures and ERROR (for example, a canceled password read).
+	 */
+	PG_TRY();
 	{
-		ereport(LOG,
-				(errmsg("pam_set_item(PAM_USER) failed: %s",
-						pam_strerror(pamh, retval))));
-		pam_passwd = NULL;		/* Unset pam_passwd */
-		return STATUS_ERROR;
-	}
-
-	if (port->hba->conntype != ctLocal)
-	{
-		char		hostinfo[NI_MAXHOST];
-		int			flags;
-
-		if (port->hba->pam_use_hostname)
-			flags = 0;
-		else
-			flags = NI_NUMERICHOST | NI_NUMERICSERV;
-
-		retval = pg_getnameinfo_all(&port->raddr.addr, port->raddr.salen,
-									hostinfo, sizeof(hostinfo), NULL, 0,
-									flags);
-		if (retval != 0)
-		{
-			ereport(WARNING,
-					(errmsg_internal("pg_getnameinfo_all() failed: %s",
-									 gai_strerror(retval))));
-			return STATUS_ERROR;
-		}
-
-		retval = pam_set_item(pamh, PAM_RHOST, hostinfo);
+		retval = pam_set_item(pamh, PAM_USER, user);
 
 		if (retval != PAM_SUCCESS)
 		{
 			ereport(LOG,
-					(errmsg("pam_set_item(PAM_RHOST) failed: %s",
+					(errmsg("pam_set_item(PAM_USER) failed: %s",
 							pam_strerror(pamh, retval))));
-			pam_passwd = NULL;
-			return STATUS_ERROR;
+			yb_pam_status = retval;
+			goto yb_pam_done;
 		}
-	}
 
-	retval = pam_set_item(pamh, PAM_CONV, &pam_passw_conv);
+		if (port->hba->conntype != ctLocal)
+		{
+			char		hostinfo[NI_MAXHOST];
+			int			flags;
 
-	if (retval != PAM_SUCCESS)
-	{
-		ereport(LOG,
-				(errmsg("pam_set_item(PAM_CONV) failed: %s",
-						pam_strerror(pamh, retval))));
-		pam_passwd = NULL;		/* Unset pam_passwd */
-		return STATUS_ERROR;
-	}
+			if (port->hba->pam_use_hostname)
+				flags = 0;
+			else
+				flags = NI_NUMERICHOST | NI_NUMERICSERV;
 
-	retval = pam_authenticate(pamh, 0);
+			retval = pg_getnameinfo_all(&port->raddr.addr, port->raddr.salen,
+										hostinfo, sizeof(hostinfo), NULL, 0,
+										flags);
+			if (retval != 0)
+			{
+				ereport(WARNING,
+						(errmsg_internal("pg_getnameinfo_all() failed: %s",
+										 gai_strerror(retval))));
+				yb_pam_status = PAM_SYSTEM_ERR;
+				goto yb_pam_done;
+			}
 
-	if (retval != PAM_SUCCESS)
-	{
-		/* If pam_passwd_conv_proc saw EOF, don't log anything */
-		if (!pam_no_password)
+			retval = pam_set_item(pamh, PAM_RHOST, hostinfo);
+
+			if (retval != PAM_SUCCESS)
+			{
+				ereport(LOG,
+						(errmsg("pam_set_item(PAM_RHOST) failed: %s",
+								pam_strerror(pamh, retval))));
+				yb_pam_status = retval;
+				goto yb_pam_done;
+			}
+		}
+
+		retval = pam_set_item(pamh, PAM_CONV, &pam_passw_conv);
+
+		if (retval != PAM_SUCCESS)
+		{
 			ereport(LOG,
-					(errmsg("pam_authenticate failed: %s",
+					(errmsg("pam_set_item(PAM_CONV) failed: %s",
 							pam_strerror(pamh, retval))));
-		pam_passwd = NULL;		/* Unset pam_passwd */
-		return pam_no_password ? STATUS_EOF : STATUS_ERROR;
+			yb_pam_status = retval;
+			goto yb_pam_done;
+		}
+
+		retval = pam_authenticate(pamh, 0);
+
+		if (yb_pam_error != NULL)
+			ReThrowError(yb_pam_error);
+
+		if (retval != PAM_SUCCESS)
+		{
+			/* If pam_passwd_conv_proc saw EOF, don't log anything */
+			if (!pam_no_password)
+				ereport(LOG,
+						(errmsg("pam_authenticate failed: %s",
+								pam_strerror(pamh, retval))));
+			yb_pam_status = retval;
+			yb_status = pam_no_password ? STATUS_EOF : STATUS_ERROR;
+			goto yb_pam_done;
+		}
+
+		retval = pam_acct_mgmt(pamh, 0);
+
+		if (yb_pam_error != NULL)
+			ReThrowError(yb_pam_error);
+
+		if (retval != PAM_SUCCESS)
+		{
+			/* If pam_passwd_conv_proc saw EOF, don't log anything */
+			if (!pam_no_password)
+				ereport(LOG,
+						(errmsg("pam_acct_mgmt failed: %s",
+								pam_strerror(pamh, retval))));
+			yb_pam_status = retval;
+			yb_status = pam_no_password ? STATUS_EOF : STATUS_ERROR;
+			goto yb_pam_done;
+		}
+
+		yb_pam_status = PAM_SUCCESS;
+		yb_status = STATUS_OK;
+
+	yb_pam_done:
+		;
 	}
-
-	retval = pam_acct_mgmt(pamh, 0);
-
-	if (retval != PAM_SUCCESS)
+	PG_FINALLY();
 	{
-		/* If pam_passwd_conv_proc saw EOF, don't log anything */
-		if (!pam_no_password)
-			ereport(LOG,
-					(errmsg("pam_acct_mgmt failed: %s",
-							pam_strerror(pamh, retval))));
-		pam_passwd = NULL;		/* Unset pam_passwd */
-		return pam_no_password ? STATUS_EOF : STATUS_ERROR;
+		yb_end_status = pam_end(pamh, yb_pam_status);
+		if (yb_pam_error != NULL)
+		{
+			FreeErrorData(yb_pam_error);
+			yb_pam_error = NULL;
+		}
+		pam_passwd = NULL;
+		pam_port_cludge = NULL;
+		pam_passw_conv.appdata_ptr = NULL;
 	}
+	PG_END_TRY();
 
-	retval = pam_end(pamh, retval);
-
-	if (retval != PAM_SUCCESS)
+	if (yb_end_status != PAM_SUCCESS)
 	{
 		ereport(LOG,
 				(errmsg("could not release PAM authenticator: %s",
-						pam_strerror(pamh, retval))));
+						pam_strerror(NULL, yb_end_status))));
+		if (yb_status == STATUS_OK)
+			yb_status = STATUS_ERROR;
 	}
 
-	pam_passwd = NULL;			/* Unset pam_passwd */
-
-	if (retval == PAM_SUCCESS)
+	if (yb_status == STATUS_OK)
 		set_authn_id(port, user);
 
-	return (retval == PAM_SUCCESS ? STATUS_OK : STATUS_ERROR);
+	return yb_status;
 }
 #endif							/* USE_PAM */
 
