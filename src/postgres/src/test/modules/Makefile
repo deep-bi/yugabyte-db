@@ -32,6 +32,9 @@ SUBDIRS = \
 		  unsafe_tests \
 		  worker_spi
 
+# YB authentication unit tests
+SUBDIRS += yb_test_pam yb_test_pam_provider
+
 ifeq ($(with_ssl),openssl)
 SUBDIRS += ssl_passphrase_callback
 else

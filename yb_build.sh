@@ -918,6 +918,7 @@ set_build_root
 propagate_bool_var_to_cmake build_tests
 propagate_bool_var_to_cmake build_fuzz_targets
 propagate_bool_var_to_cmake build_odyssey
+propagate_bool_var_to_cmake use_pam
 
 # -------------------------------------------------------------------------------------------------
 # Cleaning confirmation

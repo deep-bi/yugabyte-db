@@ -1344,12 +1344,22 @@ static int od_config_reader_rule_settings(od_config_reader_t *reader,
 						     &rule->auth_module))
 				return NOT_OK_RESPONSE;
 			break;
-#ifdef PAM_FOUND
+#if defined(YB_SUPPORT_FOUND) || defined(PAM_FOUND)
 		/* auth_pam_service */
 		case OD_LAUTH_PAM_SERVICE:
+#ifdef PAM_FOUND
 			if (!od_config_reader_string(reader,
 						     &rule->auth_pam_service))
 				return NOT_OK_RESPONSE;
+#else
+			/* YSQL selects the PAM service from its HBA configuration */
+			{
+				char *service = NULL;
+				if (!od_config_reader_string(reader, &service))
+					return NOT_OK_RESPONSE;
+				free(service);
+			}
+#endif
 			break;
 #endif
 		/* auth_query */

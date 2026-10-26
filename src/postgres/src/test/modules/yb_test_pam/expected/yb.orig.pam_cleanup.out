@@ -1,0 +1,111 @@
+CREATE FUNCTION yb_test_pam_cleanup(text) RETURNS boolean
+AS '$libdir/yb_test_pam', 'yb_test_pam_cleanup'
+LANGUAGE C STRICT;
+SET client_min_messages = error;
+SELECT scenario, yb_test_pam_cleanup(scenario) AS cleaned
+FROM (VALUES
+  ('auth_failure'),
+  ('account_failure'),
+  ('auth_eof'),
+  ('account_eof'),
+  ('start_failure'),
+  ('user_failure'),
+  ('rhost_failure'),
+  ('conversation_failure'),
+  ('hostname_failure'),
+  ('auth_error'),
+  ('account_error'),
+  ('ignored_auth_error'),
+  ('ignored_account_error'),
+  ('end_failure'),
+  ('failure_and_end_failure'),
+  ('eof_and_end_failure'),
+  ('unknown_user'),
+  ('directory_unavailable'),
+  ('max_attempts'),
+  ('account_expired'),
+  ('password_expired'),
+  ('default_service'),
+  ('empty_service'),
+  ('hostname_success'),
+  ('success'),
+  ('local_success')
+) AS cases(scenario);
+        scenario         | cleaned 
+-------------------------+---------
+ auth_failure            | t
+ account_failure         | t
+ auth_eof                | t
+ account_eof             | t
+ start_failure           | t
+ user_failure            | t
+ rhost_failure           | t
+ conversation_failure    | t
+ hostname_failure        | t
+ auth_error              | t
+ account_error           | t
+ ignored_auth_error      | t
+ ignored_account_error   | t
+ end_failure             | t
+ failure_and_end_failure | t
+ eof_and_end_failure     | t
+ unknown_user            | t
+ directory_unavailable   | t
+ max_attempts            | t
+ account_expired         | t
+ password_expired        | t
+ default_service         | t
+ empty_service           | t
+ hostname_success        | t
+ success                 | t
+ local_success           | t
+(26 rows)
+
+SELECT bool_and(yb_test_pam_cleanup(
+  CASE WHEN i % 2 = 0 THEN 'success' ELSE 'auth_failure' END)) AS reusable
+FROM generate_series(1, 100) AS attempts(i);
+ reusable 
+----------
+ t
+(1 row)
+
+DROP FUNCTION yb_test_pam_cleanup(text);
+CREATE FUNCTION yb_test_pam_conversation(text) RETURNS boolean
+AS '$libdir/yb_test_pam', 'yb_test_pam_conversation'
+LANGUAGE C STRICT;
+SELECT scenario, yb_test_pam_conversation(scenario) AS handled
+FROM (VALUES
+  ('mixed_messages'),
+  ('fallback_password'),
+  ('password_challenge'),
+  ('password_eof'),
+  ('malformed_password'),
+  ('empty_password'),
+  ('interrupted_password'),
+  ('allocation_failure'),
+  ('response_failure'),
+  ('zero_messages'),
+  ('negative_messages'),
+  ('too_many_messages'),
+  ('echo_on'),
+  ('unknown_style')
+) AS cases(scenario);
+       scenario       | handled 
+----------------------+---------
+ mixed_messages       | t
+ fallback_password    | t
+ password_challenge   | t
+ password_eof         | t
+ malformed_password   | t
+ empty_password       | t
+ interrupted_password | t
+ allocation_failure   | t
+ response_failure     | t
+ zero_messages        | t
+ negative_messages    | t
+ too_many_messages    | t
+ echo_on              | t
+ unknown_style        | t
+(14 rows)
+
+DROP FUNCTION yb_test_pam_conversation(text);

@@ -2608,6 +2608,7 @@ retry1:
 			struct sockaddr_in *ip_address_1;
 
 			ip_address_1 = (struct sockaddr_in *) (&MyProcPort->raddr.addr);
+			ip_address_1->sin_port = 0;
 			inet_pton(AF_INET, port->remote_host,
 					  &(ip_address_1->sin_addr));
 		}

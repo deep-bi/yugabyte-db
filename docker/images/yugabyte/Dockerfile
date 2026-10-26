@@ -102,6 +102,7 @@ RUN set -x; \
       net-tools \
       openssl \
       openssl-devel \
+      pam \
       redhat-rpm-config \
       rsync \
       procps \
