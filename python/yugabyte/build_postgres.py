@@ -315,6 +315,7 @@ class PostgresBuilder(YbBuildToolBase):
         self.build_root_realpath = os.path.realpath(self.build_root)
 
         self.cmake_cache = load_cmake_cache(self.build_root)
+        self.use_pam = self.cmake_cache.get_bool('YB_USE_PAM', False)
 
         self.build_type = get_build_type_from_build_root(self.build_root)
         self.pg_build_root = os.path.join(self.build_root, 'postgres_build')
@@ -600,6 +601,8 @@ class PostgresBuilder(YbBuildToolBase):
                 # We're enabling debug symbols for all types of builds.
                 '--enable-debug',
                 '--with-lz4']
+        if self.use_pam:
+            configure_cmd_line.append('--with-pam')
         if is_macos_arm64():
             configure_cmd_line.insert(0, '/opt/homebrew/bin/bash')
 
@@ -711,6 +714,7 @@ class PostgresBuilder(YbBuildToolBase):
 
         env_vars_str = self.get_env_vars_str(self.env_vars_for_build_stamp)
         build_stamp = "\n".join([
+            "use_pam=%s" % self.use_pam,
             "git_commit_sha1=%s" % git_hash,
             "git_diff_sha256=%s" % compute_sha256(git_diff),
             ])
@@ -785,6 +789,8 @@ class PostgresBuilder(YbBuildToolBase):
             self.pg_build_root,
             os.path.join(self.pg_build_root, 'contrib'),
             os.path.join(self.pg_build_root, 'src/test/modules/dummy_seclabel'),
+            os.path.join(self.pg_build_root, 'src/test/modules/yb_test_pam'),
+            os.path.join(self.pg_build_root, 'src/test/modules/yb_test_pam_provider'),
             os.path.join(self.pg_build_root, 'src/tools/pg_bsd_indent'),
         ] + external_extension_dirs
 

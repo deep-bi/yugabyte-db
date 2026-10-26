@@ -252,6 +252,12 @@ class ReleaseUtil:
                 for file_path in files:
                     copy_deep(file_path,
                               os.path.join(current_dest_dir, os.path.basename(file_path)))
+
+        # Installed for pg_regress only, macOS packaging also copies PostgreSQL libraries to bin
+        for subdir in ('postgres/lib', 'bin'):
+            test_pam_path = os.path.join(distribution_dir, subdir, 'yb_test_pam.so')
+            if os.path.lexists(test_pam_path):
+                os.remove(test_pam_path)
         logging.info("Created the distribution at '{}'".format(distribution_dir))
 
     def update_manifest(self, distribution_dir: str) -> None:

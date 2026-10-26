@@ -125,6 +125,8 @@ if(NOT DEFINED YB_BUILD_ODYSSEY)
   # Eventually we should build Odyssey by default on Linux but not on macOS.
 endif()
 
+option(YB_USE_PAM "Build with PAM authentication support" OFF)
+
 yb_put_string_vars_into_cache(YB_BUILD_FUZZ_TARGETS)
 message("YB_BUILD_FUZZ_TARGETS=${YB_BUILD_FUZZ_TARGETS}")
 

@@ -273,6 +273,8 @@ Test options:
     Build|Do not build fuzz targets. By default - do not build.
   --(with|no)-odyssey
     Specify whether to build Odyssey (PostgreSQL connection pooler). Not building by default.
+  --with-pam
+    Enable PAM authentication support. Disabled when this option is omitted.
   --enable-ysql-conn-mgr-test
     Use YSQL Connection Manager as an endpoint when running unit tests. Could also be set using
     the YB_ENABLE_YSQL_CONN_MGR_IN_TESTS env variable.
@@ -420,6 +422,8 @@ set_default_yb_build_args() {
   fi
 
   build_yugabyted_ui=false
+
+  use_pam=false
 
   validate_args_only=false
 }
@@ -868,7 +872,7 @@ parse_yb_build_cmd_line() {
         build_tests=false
       ;;
       --with-tests)
-        # We use this variable indirectly via propagate_bool_var_to_cmake.
+        # We use this variable indirectly via propagate_bool_var_to_cmake
         # shellcheck disable=SC2034
         build_tests=true
       ;;
@@ -882,6 +886,11 @@ parse_yb_build_cmd_line() {
       ;;
       --no-odyssey)
         build_odyssey=false
+      ;;
+      --with-pam)
+        # We use this variable indirectly via propagate_bool_var_to_cmake.
+        # shellcheck disable=SC2034
+        use_pam=true
       ;;
       --with-odyssey)
         if is_mac; then
