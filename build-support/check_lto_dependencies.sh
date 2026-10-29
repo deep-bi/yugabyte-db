@@ -26,6 +26,16 @@ librt
 linux-vdso
 "
 
+if [[ ${1:-} == "--with-pam" ]]; then
+  # PAM and its EL8 dependencies remain dynamically linked in PAM-enabled builds.
+  ALLOWED_LIBRARIES+="
+libaudit
+libcap-ng
+libpam
+"
+  shift
+fi
+
 for binary in "$@"; do
   # Get only lines that appear in second argument.
   #

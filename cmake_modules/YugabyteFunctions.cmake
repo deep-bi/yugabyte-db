@@ -961,12 +961,18 @@ function(yb_add_lto_target original_exe_name output_exe_name symlink_as_names)
   endforeach()
   list(APPEND cmd_args "link-whole-program")
 
+  set(check_lto_dependencies_args)
+  if(YB_USE_PAM)
+    list(APPEND check_lto_dependencies_args "--with-pam")
+  endif()
+
   message("Command for generating LTO target ${output_exe_name}: ${cmd_args}")
   add_custom_command(
     OUTPUT "${output_executable_path}"
     COMMAND ${cmd_args}
-    COMMAND "${BUILD_SUPPORT_DIR}/check_lto_dependencies.sh" "${output_executable_path}"
-    DEPENDS "${dynamic_exe_name}"
+    COMMAND "${BUILD_SUPPORT_DIR}/check_lto_dependencies.sh"
+            ${check_lto_dependencies_args} "${output_executable_path}"
+    DEPENDS "${dynamic_exe_name}" "${BUILD_SUPPORT_DIR}/check_lto_dependencies.sh"
   )
 
   add_custom_target("${output_exe_name}" ALL DEPENDS "${output_executable_path}")
