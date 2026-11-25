@@ -423,7 +423,7 @@ Status Webserver::Impl::Start() {
       return STATUS(InvalidArgument, ss.str());
     }
     LOG(INFO) << "Webserver: Password file is " << opts_.password_file;
-    options.push_back("global_passwords_file");
+    options.push_back("global_auth_file");
     options.push_back(opts_.password_file.c_str());
   }
 
