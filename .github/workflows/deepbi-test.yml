@@ -1,0 +1,17 @@
+name: DeepBI tests
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  complain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - name: throw an error
+        shell: bash
+        run: |
+          echo '::error::select an appropriate branch
+          exit 1
