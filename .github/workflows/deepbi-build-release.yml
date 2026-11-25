@@ -2,6 +2,15 @@ name: DeepBI build and release
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tag, for example v2026.1.2.0-deepbi1
+        required: true
+        type: string
+      publish_release:
+        description: Publish a new GitHub Release after the Rocky 9 package tests pass
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -13,5 +22,5 @@ jobs:
       - name: throw an error
         shell: bash
         run: |
-          echo '::error::select an appropriate branch
+          echo '::error::select an appropriate branch'
           exit 1

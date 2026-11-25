@@ -13,5 +13,5 @@ jobs:
       - name: throw an error
         shell: bash
         run: |
-          echo '::error::select an appropriate branch
+          echo '::error::select an appropriate branch'
           exit 1
