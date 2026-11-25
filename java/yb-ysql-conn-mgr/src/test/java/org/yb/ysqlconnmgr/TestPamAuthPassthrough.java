@@ -3,11 +3,8 @@
 package org.yb.ysqlconnmgr;
 
 import org.junit.runner.RunWith;
-import org.yb.YBTestRunner;
-import org.yb.util.RequiresLinux;
 
-@RequiresLinux
-@RunWith(YBTestRunner.class)
+@RunWith(YBTestRunnerYsqlConnMgr.class)
 public class TestPamAuthPassthrough extends BasePamAuth {
   @Override
   protected boolean useAuthBackend() {

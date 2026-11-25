@@ -201,7 +201,7 @@ public abstract class BasePamAuth extends BaseYsqlConnMgr {
     try {
       socket.connect(addr, 10000);
       socket.setSoTimeout(20000);
-      socket.getOutputStream().write(buildStartupMessage("pam_alice", "yugabyte", null));
+      socket.getOutputStream().write(buildStartupMessage("pam_alice", "yugabyte"));
       PgMessage message = readMessage(new DataInputStream(socket.getInputStream()));
       assertEquals('R', message.type);
       assertEquals(3, ByteBuffer.wrap(message.body).getInt());
