@@ -1,0 +1,162 @@
+name: DeepBI build and release
+run-name: Build ${{ inputs.release_tag }} on EL9
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tag, for example v2026.1.2.0-deepbi1
+        required: true
+        type: string
+      publish_release:
+        description: Publish a new GitHub Release after the Rocky 9 package tests pass
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deepbi-release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      package_artifact_id: ${{ steps.package.outputs.artifact-id }}
+    steps:
+      - name: Check out workflow tools
+        uses: actions/checkout@v7
+        with:
+          path: ci
+          sparse-checkout: build-support/deepbi
+          persist-credentials: false
+      - name: Check out release tag
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.release_tag }}
+          path: source
+          persist-credentials: false
+      - name: Record source commit
+        id: source
+        run: |
+          mkdir -p out
+          git -C source rev-parse HEAD | tee out/source-sha.txt
+          echo "sha=$(cat out/source-sha.txt)" >> "$GITHUB_OUTPUT"
+      - name: Measure and reclaim unused hosted SDK space
+        run: |
+          mkdir -p out
+          df -h | tee out/disk-before.txt
+          [[ "$RUNNER_ENVIRONMENT" == github-hosted && "$RUNNER_OS" == Linux ]]
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h | tee out/disk-after.txt
+      - name: Build full-LTO PAM package with four jobs
+        timeout-minutes: 330
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          bash ci/build-support/deepbi/run.sh build source out 2>&1 | tee out/build.log
+      - name: Upload package and checksums
+        id: package
+        uses: actions/upload-artifact@v7
+        with:
+          name: deepbi-package-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/assets/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deepbi-build-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            out/*.log
+            out/*.txt
+          retention-days: 7
+
+  smoke:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: ci
+          sparse-checkout: build-support/deepbi
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.package_artifact_id }}
+          path: package
+      - name: Test extracted package on Rocky Linux 9
+        timeout-minutes: 20
+        run: |
+          mkdir -p out
+          bash ci/build-support/deepbi/run.sh smoke package out 2>&1 | tee out/smoke.log
+      - name: Upload Rocky 9 diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deepbi-rocky9-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/
+          retention-days: 7
+
+  release:
+    if: inputs.publish_release
+    needs: [build, smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Recheck release tag
+        uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.release_tag }}
+          path: source
+          persist-credentials: false
+          sparse-checkout: version.txt
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.package_artifact_id }}
+          path: package
+      - name: Publish verified package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+        run: |
+          [[ "$(git -C source rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          cd package
+          sha256sum --check SHA256SUMS
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          manifest = json.loads(pathlib.Path('build-manifest.json').read_text())
+          assert manifest['source_sha'] == os.environ['SOURCE_SHA']
+          assert manifest['release_tag'] == os.environ['RELEASE_TAG']
+          pathlib.Path('release-notes.md').write_text(
+              f"Source commit: {manifest['source_sha']}\n\n"
+              "Built on AlmaLinux 9 with Clang 21, full LTO, and PAM.\n\n"
+              f"Third-party dependencies: {manifest['thirdparty_url']}\n\n"
+              "Rocky Linux 9 package smoke tests passed: SQL writes and reads, "
+              "PAM login and wrong-password rejection, direct YSQL and both "
+              "Connection Manager authentication modes.\n\n"
+              "Source test suites are run separately by the DeepBI tests workflow.\n"
+          )
+          PY
+          gh release create "$RELEASE_TAG" \
+            ./*.tar.gz SHA256SUMS build-manifest.json \
+            --verify-tag --title "${RELEASE_TAG#v}" --notes-file release-notes.md

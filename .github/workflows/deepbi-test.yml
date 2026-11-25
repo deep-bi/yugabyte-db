@@ -1,0 +1,56 @@
+name: DeepBI tests
+run-name: Test ${{ github.ref_name }} (C++ and Java)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out workflow tools
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: ci
+          sparse-checkout: build-support/deepbi
+          persist-credentials: false
+      - name: Check out test source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: source
+          persist-credentials: false
+      - name: Measure and reclaim unused hosted SDK space
+        run: |
+          mkdir -p out
+          git -C source rev-parse HEAD | tee out/source-sha.txt
+          df -h | tee out/disk-before.txt
+          [[ "$RUNNER_ENVIRONMENT" == github-hosted && "$RUNNER_OS" == Linux ]]
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h | tee out/disk-after.txt
+      - name: Build and run all C++ and Java tests
+        timeout-minutes: 330
+        run: |
+          bash ci/build-support/deepbi/run.sh test source out 2>&1 | tee out/test.log
+      - name: Upload test reports and resource measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deepbi-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            out/
+            source/java/**/target/surefire-reports*/**
+            source/build/**/collecting_java_tests.*
+            source/build/**/yb-test-logs/**/*.xml
+            source/build/**/yb-test-logs/**/*.log
+            source/build/**/yb-test-logs/**/*_test_report.json
+          retention-days: 7
