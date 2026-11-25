@@ -15,6 +15,8 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    env:
+      MAVEN_CACHE_DIR: ${{ github.workspace }}/maven-repository
     steps:
       - name: Check out workflow tools
         uses: actions/checkout@v7
@@ -29,6 +31,15 @@ jobs:
           ref: ${{ github.sha }}
           path: source
           persist-credentials: false
+      - name: Restore Maven dependencies
+        id: maven-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.MAVEN_CACHE_DIR }}
+          key: deepbi-maven-el9-x64-jdk11-v1-${{ hashFiles('source/java/**/pom.xml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            deepbi-maven-el9-x64-jdk11-v1-${{ hashFiles('source/java/**/pom.xml') }}-
+            deepbi-maven-el9-x64-jdk11-v1-
       - name: Measure and reclaim unused hosted SDK space
         run: |
           mkdir -p out
@@ -41,6 +52,20 @@ jobs:
         timeout-minutes: 330
         run: |
           bash ci/build-support/deepbi/run.sh test source out 2>&1 | tee out/test.log
+      - name: Prepare downloaded dependencies for caching
+        if: ${{ !cancelled() && steps.maven-cache.outputs.cache-primary-key != '' }}
+        run: |
+          if [[ -d "$MAVEN_CACHE_DIR" ]]; then
+            # exclude project builds and cached download failures
+            rm -rf "$MAVEN_CACHE_DIR/org/yb"
+            find "$MAVEN_CACHE_DIR" -type f -name '*.lastUpdated' -delete
+          fi
+      - name: Save Maven dependencies even after a failed build
+        if: ${{ !cancelled() && steps.maven-cache.outputs.cache-primary-key != '' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.MAVEN_CACHE_DIR }}
+          key: ${{ steps.maven-cache.outputs.cache-primary-key }}
       - name: Upload test reports and resource measurements
         if: always()
         uses: actions/upload-artifact@v7

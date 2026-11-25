@@ -97,7 +97,18 @@ receive no GitHub token. Source checkout credentials are not persisted.
 Before compilation, the workflows record free disk space, remove the unused
 Android, .NET, and GHC SDK directories on the disposable hosted runner, and
 record disk space again. This cleanup is not part of the local container helper.
-There is no shared build cache in this first version.
+The build and test jobs restore Maven dependencies into a runner directory mounted
+at `/home/ybci/.m2/repository` in the container. Each completed attempt saves the
+downloaded dependencies, including after build or test failures. Project artifacts
+under `org/yb` and failed-download markers are excluded. Cache keys include the
+Java POM hash, with fallback to earlier EL9/Java 11 dependency caches available to
+the branch. Native build outputs are not cached.
+
+Both jobs run Maven's non-recursive `validate` goal before C++ compilation. This
+loads the parent POM and its build extensions, so failures such as an HTTP 429
+while downloading `maven-s3-wagon` stop the run early. It does not prefetch every
+test dependency. An empty cache still needs access to Maven Central, and caching
+cannot guarantee that a rate-limited download will succeed.
 
 Diagnostic artifacts retain logs for seven days, including failed runs:
 

@@ -55,8 +55,14 @@ docker image inspect "$run_name" --format '{{.Id}}' > "$output_dir/container-ima
 
 mount_mode=rw
 [[ $mode != smoke ]] || mount_mode=ro
+maven_mount=()
+if [[ $stage == build && -n ${MAVEN_CACHE_DIR:-} ]]; then
+  mkdir -p "$MAVEN_CACHE_DIR"
+  maven_mount=(-v "$(realpath "$MAVEN_CACHE_DIR"):/home/ybci/.m2/repository")
+fi
 docker run --rm --init --name "$run_name" --shm-size=1g \
   --ulimit core=0 --ulimit nofile=65536:65536 \
   -v "$source_dir:/src:$mount_mode" -v "$output_dir:/out" \
+  "${maven_mount[@]}" \
   -e "RELEASE_TAG=${RELEASE_TAG:-}" -e "SOURCE_SHA=${SOURCE_SHA:-}" \
   "$run_name" /usr/bin/time -v -o /out/time.txt bash "/ci/$mode.sh"

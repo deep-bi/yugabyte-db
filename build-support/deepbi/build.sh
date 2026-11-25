@@ -25,6 +25,8 @@ mkdir -p /out/assets
   java -version
 } > /out/tool-versions.txt 2>&1
 
+# resolve Maven build extensions before spending time on C++ compilation
+mvn --batch-mode --non-recursive --file java/pom.xml validate
 YB_RELEASE_BUILD_NUMBER="$build_number" ./yb_release \
   --force --build release \
   --save_release_path_to_file /out/package-path.txt \

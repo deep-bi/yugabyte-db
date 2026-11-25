@@ -28,6 +28,8 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    env:
+      MAVEN_CACHE_DIR: ${{ github.workspace }}/maven-repository
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
       package_artifact_id: ${{ steps.package.outputs.artifact-id }}
@@ -44,6 +46,15 @@ jobs:
           ref: refs/tags/${{ inputs.release_tag }}
           path: source
           persist-credentials: false
+      - name: Restore Maven dependencies
+        id: maven-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.MAVEN_CACHE_DIR }}
+          key: deepbi-maven-el9-x64-jdk11-v1-${{ hashFiles('source/java/**/pom.xml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            deepbi-maven-el9-x64-jdk11-v1-${{ hashFiles('source/java/**/pom.xml') }}-
+            deepbi-maven-el9-x64-jdk11-v1-
       - name: Record source commit
         id: source
         run: |
@@ -64,6 +75,20 @@ jobs:
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           bash ci/build-support/deepbi/run.sh build source out 2>&1 | tee out/build.log
+      - name: Prepare downloaded dependencies for caching
+        if: ${{ !cancelled() && steps.maven-cache.outputs.cache-primary-key != '' }}
+        run: |
+          if [[ -d "$MAVEN_CACHE_DIR" ]]; then
+            # exclude project builds and cached download failures
+            rm -rf "$MAVEN_CACHE_DIR/org/yb"
+            find "$MAVEN_CACHE_DIR" -type f -name '*.lastUpdated' -delete
+          fi
+      - name: Save Maven dependencies even after a failed build
+        if: ${{ !cancelled() && steps.maven-cache.outputs.cache-primary-key != '' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.MAVEN_CACHE_DIR }}
+          key: ${{ steps.maven-cache.outputs.cache-primary-key }}
       - name: Upload package and checksums
         id: package
         uses: actions/upload-artifact@v7
