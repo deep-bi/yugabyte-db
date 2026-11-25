@@ -287,6 +287,62 @@ TEST_F(WebserverTest, TestStaticFiles) {
   ASSERT_EQ("Remote error: HTTP 403", s.ToString(/* no file/line */ false));
 }
 
+class WebserverAuthTest : public WebserverTest {
+ public:
+  WebserverAuthTest() {
+    password_file_ = GetTestPath("webserver-htdigest");
+  }
+
+  WebserverOptions ServerOptions() override {
+    auto opts = WebserverTest::ServerOptions();
+    opts.authentication_domain = kAuthDomain;
+    opts.password_file = password_file_;
+    return opts;
+  }
+
+  void SetUp() override {
+    // create the digest file before starting the server: user:realm:md5(user:realm:password)
+    // the hash below is md5("yugabyte:YugabyteDB:yugabyte")
+    ASSERT_OK(WriteStringToFile(
+        env_.get(),
+        Format("$0:$1:0fbdc56fb215d4d2e29ff88863aa2da5\n", kUser, kAuthDomain),
+        password_file_));
+    WebserverTest::SetUp();
+  }
+
+ protected:
+  static constexpr const char* kAuthDomain = "YugabyteDB";
+  static constexpr const char* kUser = "yugabyte";
+  static constexpr const char* kPassword = "yugabyte";
+  string password_file_;
+};
+
+TEST_F(WebserverAuthTest, TestUnauthenticatedRequestRejected) {
+  Status s = curl_.FetchURL(url_, &buf_);
+  ASSERT_EQ("Remote error: HTTP 401", s.ToString(/* no file/line */ false));
+}
+
+TEST_F(WebserverAuthTest, TestAuthenticatedRequestSucceeds) {
+  curl_.set_auth_creds(kUser, kPassword);
+  ASSERT_OK(curl_.FetchURL(url_, &buf_));
+  ASSERT_STR_CONTAINS(buf_.ToString(), "Yugabyte");
+}
+
+TEST_F(WebserverAuthTest, TestIncorrectPasswordRejected) {
+  curl_.set_auth_creds(kUser, "incorrect-password");
+  Status s = curl_.FetchURL(url_, &buf_);
+  ASSERT_EQ("Remote error: HTTP 401", s.ToString(/* no file/line */ false));
+}
+
+TEST_F(WebserverAuthTest, TestClearedCredentialsRejected) {
+  curl_.set_auth_creds(kUser, kPassword);
+  ASSERT_OK(curl_.FetchURL(url_, &buf_));
+
+  curl_.set_auth_creds("", "");
+  Status s = curl_.FetchURL(url_, &buf_);
+  ASSERT_EQ("Remote error: HTTP 401", s.ToString(/* no file/line */ false));
+}
+
 class WebserverSecureTest : public WebserverTest {
  public:
   WebserverOptions ServerOptions() override {

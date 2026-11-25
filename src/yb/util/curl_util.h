@@ -111,6 +111,11 @@ class EasyCurl {
     cipher_list_ = cipher_list;
   }
 
+  // answer HTTP auth challenges, or disable auth when both strings are empty
+  void set_auth_creds(const std::string& user, const std::string& password) {
+    auth_creds_ = user.empty() && password.empty() ? "" : user + ":" + password;
+  }
+
  private:
   // Do a request. If 'post_data' is non-NULL, does a POST.
   // Otherwise, does a GET.
@@ -130,6 +135,7 @@ class EasyCurl {
   int64 ssl_version_ = 0;
   // The allowed SSL ciphers to use. Defaults to system default.
   std::string cipher_list_;
+  std::optional<std::string> auth_creds_;
   DISALLOW_COPY_AND_ASSIGN(EasyCurl);
 };
 
