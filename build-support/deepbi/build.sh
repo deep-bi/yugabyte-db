@@ -26,7 +26,8 @@ mkdir -p /out/assets
 } > /out/tool-versions.txt 2>&1
 
 # resolve Maven build extensions before spending time on C++ compilation
-mvn --batch-mode --non-recursive --file java/pom.xml validate
+# TODO: restore Maven after C++ compilation once the build is stable
+bash /ci/check_maven.sh /out
 YB_RELEASE_BUILD_NUMBER="$build_number" ./yb_release \
   --force --build release \
   --save_release_path_to_file /out/package-path.txt \

@@ -4,7 +4,8 @@ cd /src
 git rev-parse HEAD > /out/source-sha.txt
 printf '%s\n' all > /out/test-suite.txt
 # resolve Maven build extensions before spending time on C++ compilation
-mvn --batch-mode --non-recursive --file java/pom.xml validate
+# TODO: restore Maven after C++ compilation once the build is stable
+bash /ci/check_maven.sh /out
 common=(release --clang21 --with-pam --with-odyssey -j4)
 ./yb_build.sh "${common[@]}" --collect-java-tests
 # initdb must complete before invoking tests

@@ -110,6 +110,12 @@ while downloading `maven-s3-wagon` stop the run early. It does not prefetch ever
 test dependency. An empty cache still needs access to Maven Central, and caching
 cannot guarantee that a rate-limited download will succeed.
 
+If this check fails, a single curl request probes the `maven-s3-wagon` POM from
+the same container, with a 30-second timeout. The `maven-central-*.txt` artifacts
+capture its HTTP status, response headers and body, and tool versions. The job
+still fails with Maven's exit status even if curl succeeds. This helps compare
+Maven and curl access from the runner; it does not fix rate limiting.
+
 Diagnostic artifacts retain logs for seven days, including failed runs:
 
 - `resources.log`: host RAM, filesystem space, and container memory/CPU samples
@@ -125,7 +131,7 @@ record package installation, and release diagnostics include tool versions.
 ## Local workflow checks
 
 ```bash
-bash -n build-support/deepbi/{run,build,test,smoke}.sh
+for script in build-support/deepbi/*.sh; do bash -n "$script"; done
 python3 -m unittest discover -s build-support/deepbi -p 'test_*.py'
 actionlint .github/workflows/deepbi-build-release.yml .github/workflows/deepbi-test.yml
 git diff --check
