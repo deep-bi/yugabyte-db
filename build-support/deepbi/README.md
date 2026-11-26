@@ -104,17 +104,26 @@ under `org/yb` and failed-download markers are excluded. Cache keys include the
 Java POM hash, with fallback to earlier EL9/Java 11 dependency caches available to
 the branch. Native build outputs are not cached.
 
+Each job first probes the `maven-s3-wagon` POM at Maven Central from inside the
+container, with a 20-second timeout and no retries. HTTP 200 selects Central.
+HTTP 429, HTTP 5xx, or a network connection/transfer failure selects
+[Google's Maven Central mirror](https://docs.cloud.google.com/docs/buildpacks/java#google_cloud_hosted_maven_central_mirror)
+for the rest of that job. Other HTTP responses and TLS verification errors fail
+the check. The generated `~/.m2/settings.xml` applies to both the initial Maven
+check and later Java builds and tests, and redirects only `central` when the
+mirror is selected. Each new job probes Central again.
+
 Both jobs run Maven's non-recursive `validate` goal before C++ compilation. This
 loads the parent POM and its build extensions, so failures such as an HTTP 429
 while downloading `maven-s3-wagon` stop the run early. It does not prefetch every
-test dependency. An empty cache still needs access to Maven Central, and caching
-cannot guarantee that a rate-limited download will succeed.
+test dependency. An empty cache still needs access to the selected repository,
+and caching cannot guarantee that a rate-limited download will succeed.
 
-If this check fails, a single curl request probes the `maven-s3-wagon` POM from
-the same container, with a 30-second timeout. The `maven-central-*.txt` artifacts
-capture its HTTP status, response headers and body, and tool versions. The job
-still fails with Maven's exit status even if curl succeeds. This helps compare
-Maven and curl access from the runner; it does not fix rate limiting.
+The `maven-central-*.txt` artifacts capture the startup probe's HTTP status,
+response headers and body, curl errors, and tool versions. `maven-repository.txt`
+records the selected repository. Maven failures retain their exit status; there
+is no automatic retry or repository switch later in the job. A successful probe
+does not guarantee that Central will remain available throughout the build.
 
 Diagnostic artifacts retain logs for seven days, including failed runs:
 

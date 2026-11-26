@@ -15,12 +15,13 @@ RUN ln -s /usr/bin/python3.11 /usr/local/bin/python3 && \
     python3.11 -m pip install --no-cache-dir cmake==3.31.6 && \
     groupadd --gid "$BUILD_GID" ybci && \
     useradd --uid "$BUILD_UID" --gid "$BUILD_GID" --create-home ybci && \
-    mkdir -p /opt/yb-build && chown ybci:ybci /opt/yb-build
+    mkdir -p /opt/yb-build /home/ybci/.m2 && \
+    chown ybci:ybci /opt/yb-build /home/ybci/.m2
 
 ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
     JAVA_HOME=/usr/lib/jvm/java-11-openjdk \
     PATH=/home/ybci/.cargo/bin:/usr/local/bin:/usr/bin:/bin
-COPY build.sh test.sh check_maven.sh check_reports.py /ci/
+COPY build.sh test.sh check_maven.sh check_reports.py maven-settings.xml /ci/
 USER ybci
 RUN curl -fsSL https://sh.rustup.rs -o /tmp/rustup.sh && \
     sh /tmp/rustup.sh -y --profile minimal && rm /tmp/rustup.sh
