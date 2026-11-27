@@ -851,9 +851,10 @@ try_set_ulimited_ulimit() {
   # Setting the ulimit may fail with an error message, and that's what we want. We will still
   # run the test.  In case we do manage to set the core file size limit, the caller can restore the
   # previous limit after exiting a subshell.
-  if ! ulimit -c unlimited; then
+  local -r core_limit=${YB_TEST_ULIMIT_CORE:-unlimited}
+  if ! ulimit -c "$core_limit"; then
     # Print some diagnostics if we fail to set core file size limit.
-    log "Command 'ulimit -c unlimited' failed. Current 'ulimit -c' output: $( ulimit -c )"
+    log "Command 'ulimit -c $core_limit' failed. Current 'ulimit -c' output: $( ulimit -c )"
   fi
 }
 

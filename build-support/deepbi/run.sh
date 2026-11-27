@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mode=${1:?usage: run.sh build|test|smoke source_dir output_dir}
+mode=${1:?usage: run.sh build|prepare-tests|test|test-prebuilt|smoke source_dir output_dir}
+script=$mode
+script_args=()
 case "$mode" in
-  build|test) stage=build ;;
+  build|prepare-tests|test) stage=build ;;
+  test-prebuilt) stage=build; script=test; script_args=(--prebuilt) ;;
   smoke) stage=smoke ;;
   *) echo "Unknown mode: $mode" >&2; exit 2 ;;
 esac
 source_dir=$(realpath "${2:?source directory required}")
+if [[ -z ${MAVEN_CACHE_DIR:-} && ( $mode == prepare-tests || $mode == test-prebuilt ) ]]; then
+  # the bundle stores the Maven repository alongside its source checkout
+  if [[ ${source_dir##*/} == source ]]; then
+    MAVEN_CACHE_DIR=${source_dir%/*}/maven-repository
+  else
+    MAVEN_CACHE_DIR=$source_dir/build/maven-repository
+  fi
+fi
 mkdir -p "${3:?output directory required}"
 output_dir=$(realpath "$3")
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -65,4 +76,6 @@ docker run --rm --init --name "$run_name" --shm-size=1g \
   -v "$source_dir:/src:$mount_mode" -v "$output_dir:/out" \
   "${maven_mount[@]}" \
   -e "RELEASE_TAG=${RELEASE_TAG:-}" -e "SOURCE_SHA=${SOURCE_SHA:-}" \
-  "$run_name" /usr/bin/time -v -o /out/time.txt bash "/ci/$mode.sh"
+  -e "TEST_SUITE=${TEST_SUITE:-all}" \
+  -e "TEST_SHARD_INDEX=${TEST_SHARD_INDEX:-1}" -e "TEST_SHARD_COUNT=${TEST_SHARD_COUNT:-1}" \
+  "$run_name" /usr/bin/time -v -o /out/time.txt bash "/ci/$script.sh" "${script_args[@]}"

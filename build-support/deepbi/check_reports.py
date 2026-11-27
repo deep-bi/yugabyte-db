@@ -6,8 +6,12 @@ import sys
 import xml.etree.ElementTree as ET
 
 
-def check_reports(java_dir: pathlib.Path) -> int:
-    reports = sorted(java_dir.glob('*/target/surefire-reports*/TEST-*.xml'))
+def check_reports(source: pathlib.Path) -> int:
+    if source.is_file():
+        artifacts = map(pathlib.Path, source.read_text().splitlines())
+        reports = sorted({path for path in artifacts if path.match('TEST-*.xml')})
+    else:
+        reports = sorted(source.glob('*/target/surefire-reports*/TEST-*.xml'))
     executed = 0
     problems = []
     for path in reports:

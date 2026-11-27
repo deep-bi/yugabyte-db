@@ -1,36 +1,53 @@
 name: DeepBI tests
-run-name: Test ${{ github.ref_name }} (C++ and Java)
+run-name: ${{ inputs.full_suite && 'Full source tests' || 'Test bundle trial' }} on ${{ github.ref_name }}
 
 on:
   workflow_dispatch:
+    inputs:
+      full_suite:
+        description: Run all C++ and Java shards instead of testing the bundle on one runner
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+
+concurrency:
+  group: deepbi-source-tests
+  queue: max
 
 defaults:
   run:
     shell: bash
 
+env:
+  MAVEN_CACHE_DIR: ${{ github.workspace }}/maven-repository
+
 jobs:
-  test:
+  build:
+    name: Build source tests
     runs-on: ubuntu-24.04
     timeout-minutes: 360
-    env:
-      MAVEN_CACHE_DIR: ${{ github.workspace }}/maven-repository
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      sha256: ${{ steps.pack.outputs.sha256 }}
     steps:
-      - name: Check out workflow tools
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          path: ci
-          sparse-checkout: build-support/deepbi
-          persist-credentials: false
-      - name: Check out test source
+      - &checkout
+        name: Check out test source
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           path: source
           persist-credentials: false
+      - &space
+        name: Measure and reclaim unused hosted SDK space
+        run: |
+          mkdir -p out
+          git -C source rev-parse HEAD > out/source-sha.txt
+          df -h . | tee out/disk-before.txt
+          [[ "$RUNNER_ENVIRONMENT" == github-hosted && "$RUNNER_OS" == Linux ]]
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h . | tee out/disk-after.txt
       - name: Restore Maven dependencies
         id: maven-cache
         uses: actions/cache/restore@v5
@@ -40,41 +57,93 @@ jobs:
           restore-keys: |
             deepbi-maven-el9-x64-jdk11-v1-${{ hashFiles('source/java/**/pom.xml') }}-
             deepbi-maven-el9-x64-jdk11-v1-
-      - name: Measure and reclaim unused hosted SDK space
-        run: |
-          mkdir -p out
-          git -C source rev-parse HEAD | tee out/source-sha.txt
-          df -h | tee out/disk-before.txt
-          [[ "$RUNNER_ENVIRONMENT" == github-hosted && "$RUNNER_OS" == Linux ]]
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
-          df -h | tee out/disk-after.txt
-      - name: Build and run all C++ and Java tests
+      - name: Compile C++ and Java, collect tests, and run initdb
         timeout-minutes: 330
+        run: bash source/build-support/deepbi/run.sh prepare-tests source out 2>&1 | tee out/build.log
+      - name: Package test bundle
+        id: pack
         run: |
-          bash ci/build-support/deepbi/run.sh test source out 2>&1 | tee out/test.log
+          bash source/build-support/deepbi/pack-test-bundle.sh
+          sha256sum test-bundle.tar.zst | cut -d ' ' -f 1 | sed 's/^/sha256=/' >> "$GITHUB_OUTPUT"
+          echo "Compressed test bundle: $(stat -c %s test-bundle.tar.zst) bytes" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload test bundle
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-bundle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-bundle.tar.zst
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
       - name: Prepare downloaded dependencies for caching
         if: ${{ !cancelled() && steps.maven-cache.outputs.cache-primary-key != '' }}
         run: |
           if [[ -d "$MAVEN_CACHE_DIR" ]]; then
-            # exclude project builds and cached download failures
             rm -rf "$MAVEN_CACHE_DIR/org/yb"
             find "$MAVEN_CACHE_DIR" -type f -name '*.lastUpdated' -delete
           fi
-      - name: Save Maven dependencies even after a failed build
+      - name: Save Maven dependencies
         if: ${{ !cancelled() && steps.maven-cache.outputs.cache-primary-key != '' }}
         uses: actions/cache/save@v5
         with:
           path: ${{ env.MAVEN_CACHE_DIR }}
           key: ${{ steps.maven-cache.outputs.cache-primary-key }}
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deepbi-test-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            out/
+            source/build/**/collecting_java_tests.*
+            source/build/**/yb-test-logs/**/*.xml
+            source/build/**/yb-test-logs/**/*.log
+            source/build/**/yb-test-logs/**/*_test_report.json
+          retention-days: 7
+
+  test:
+    needs: build
+    name: ${{ matrix.suite }} (${{ matrix.shard }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        suite: ${{ fromJSON(inputs.full_suite && '["cpp","java"]' || '["probe"]') }}
+        shard: ${{ fromJSON(inputs.full_suite && '[1,2,3,4,5,6,7,8]' || '[1]') }}
+    env:
+      TEST_SUITE: ${{ matrix.suite }}
+      TEST_SHARD_INDEX: ${{ matrix.shard }}
+      TEST_SHARD_COUNT: ${{ inputs.full_suite && 8 || 1 }}
+    steps:
+      - *checkout
+      - *space
+      - name: Download test bundle
+        uses: actions/download-artifact@v8
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          path: bundle
+          merge-multiple: true
+      - name: Verify and unpack test bundle
+        env:
+          BUNDLE_SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          printf '%s  %s\n' "$BUNDLE_SHA256" bundle/test-bundle.tar.zst | sha256sum --check
+          tar --zstd -xf bundle/test-bundle.tar.zst
+          rm bundle/test-bundle.tar.zst
+          df -h . | tee out/disk-restored.txt
+      - name: Run tests from shared build
+        timeout-minutes: 330
+        run: bash source/build-support/deepbi/run.sh test-prebuilt source out 2>&1 | tee out/test.log
       - name: Upload test reports and resource measurements
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: deepbi-tests-${{ github.run_id }}-${{ github.run_attempt }}
+          name: deepbi-tests-${{ matrix.suite }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             out/
             source/java/**/target/surefire-reports*/**
-            source/build/**/collecting_java_tests.*
             source/build/**/yb-test-logs/**/*.xml
             source/build/**/yb-test-logs/**/*.log
             source/build/**/yb-test-logs/**/*_test_report.json

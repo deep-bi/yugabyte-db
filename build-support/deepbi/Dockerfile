@@ -21,7 +21,7 @@ RUN ln -s /usr/bin/python3.11 /usr/local/bin/python3 && \
 ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 \
     JAVA_HOME=/usr/lib/jvm/java-11-openjdk \
     PATH=/home/ybci/.cargo/bin:/usr/local/bin:/usr/bin:/bin
-COPY build.sh test.sh check_maven.sh check_reports.py maven-settings.xml /ci/
+COPY build.sh prepare-tests.sh test.sh check_maven.sh check_reports.py maven-settings.xml /ci/
 USER ybci
 RUN curl -fsSL https://sh.rustup.rs -o /tmp/rustup.sh && \
     sh /tmp/rustup.sh -y --profile minimal && rm /tmp/rustup.sh
